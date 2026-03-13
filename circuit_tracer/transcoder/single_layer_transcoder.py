@@ -512,7 +512,8 @@ def load_gemma_scope_2_transcoder(
     if lazy_encoder or lazy_decoder:
         warnings.warn(
             "Lazy loading is not supported for GemmaScope2 format due to different key naming conventions. "
-            "Setting lazy_encoder=False and lazy_decoder=False.",
+            "Setting lazy_encoder=False and lazy_decoder=False. If you wish to use lazy loading, please "
+            "cache the relevant transcoders via circuit_tracer.utils.caching.save_transcoders_to_cache",
             UserWarning,
         )
         lazy_encoder = False
