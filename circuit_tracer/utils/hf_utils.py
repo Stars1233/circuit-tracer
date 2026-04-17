@@ -151,6 +151,8 @@ def load_transcoders(
             feature_input_hook=config["feature_input_hook"],
             feature_output_hook=config["feature_output_hook"],
             special_load_fn=special_load_fn,
+            activation=config.get("activation"),
+            k=config.get("k"),
             dtype=dtype,
             device=device,
             lazy_encoder=lazy_encoder,

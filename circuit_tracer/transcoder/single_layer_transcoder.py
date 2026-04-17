@@ -12,7 +12,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 from torch import nn
 
-from circuit_tracer.transcoder.activation_functions import JumpReLU
+from circuit_tracer.transcoder.activation_functions import JumpReLU, TopK
 from circuit_tracer.utils import get_default_device
 
 
@@ -218,6 +218,9 @@ class SingleLayerTranscoder(nn.Module):
 
         if isinstance(self.activation_function, JumpReLU):
             state_dict["activation_function.threshold"] = self.activation_function.threshold.cpu()
+
+        if isinstance(self.activation_function, TopK):
+            state_dict["k"] = torch.tensor(self.activation_function.k)
 
         if self.W_skip is not None:
             state_dict["W_skip"] = self.W_skip.cpu()
@@ -441,9 +444,10 @@ def load_gemma_scope_transcoder(
     return transcoder
 
 
-def load_relu_transcoder(
+def load_transcoder(
     path: str,
     layer: int,
+    activation_fn=None,
     device: torch.device | None = None,
     dtype: torch.dtype = torch.float32,
     lazy_encoder: bool = True,
@@ -464,12 +468,15 @@ def load_relu_transcoder(
     d_sae = param_dict["b_enc"].shape[0]
     d_model = param_dict["b_dec"].shape[0]
 
-    assert param_dict.get("log_thresholds") is None
-    activation_function = (
-        JumpReLU(param_dict["activation_function.threshold"], 0.1)
-        if "activation_function.threshold" in param_dict
-        else F.relu
-    )
+    # JumpReLU
+    if activation_fn is None:
+        if "activation_function.threshold" in param_dict:
+            activation_function = JumpReLU(param_dict["activation_function.threshold"], 0.1)
+        else:
+            activation_function = F.relu
+    else:
+        activation_function = activation_fn
+
     with torch.device("meta"):
         transcoder = SingleLayerTranscoder(
             d_model,
@@ -492,6 +499,7 @@ def load_gemma_scope_2_transcoder(
     dtype: torch.dtype = torch.float32,
     lazy_encoder: bool = False,
     lazy_decoder: bool = False,
+    **kwargs,
 ) -> SingleLayerTranscoder:
     """Load a SingleLayerTranscoder from a GemmaScope2 JumpReLUSAE checkpoint.
 
@@ -561,6 +569,9 @@ def load_transcoder_set(
     device: torch.device | None = None,
     dtype: torch.dtype = torch.float32,
     special_load_fn: Literal["gemma-scope", "gemma-scope-2", None] = None,
+    # Activation function config; k is only used when activation="topk"
+    activation: str | None = None,
+    k: int | None = None,
     lazy_encoder: bool = True,
     lazy_decoder: bool = True,
 ) -> TranscoderSet:
@@ -574,14 +585,30 @@ def load_transcoder_set(
         feature_input_hook: Hook point where features read from
         feature_output_hook: Hook point where features write to
         device (torch.device | None, optional): Device to load to
-        dtype (torch.dtype, optional): Data type to use
+        dtype (torch.dtype | None, optional): Data type to use
         special_load_fn: Which special loading function to use
+        config: The config file
         lazy_encoder: Whether to use lazy loading for encoder weights
         lazy_decoder: Whether to use lazy loading for decoder weights
 
     Returns:
         TranscoderSet: The loaded transcoder set with all configuration
     """
+
+    if activation == "topk":
+        if scan == "facebook/crv-8b-instruct-transcoders":
+            warnings.warn(
+                """This top-k transcoder (facebook/crv-8b-instruct-transcoders) has a hardcoded value of k = 128.
+                In general, k should be set in the config.yaml"""
+            )
+            k = 128
+        assert k is not None, "You must pass k if activation is topk"
+        activation_fn = TopK(k)
+    elif activation == "relu":
+        activation_fn = F.relu
+    else:
+        # For JumpReLU (and potentially others), we load the log-thresholds from weights
+        activation_fn = None
 
     transcoders = {}
     for layer in range(len(transcoder_paths)):
@@ -592,11 +619,12 @@ def load_transcoder_set(
         elif special_load_fn == "gemma-scope-2":
             load_fn = load_gemma_scope_2_transcoder
         else:
-            load_fn = load_relu_transcoder
+            load_fn = load_transcoder
 
         transcoders[layer] = load_fn(
             transcoder_paths[layer],
             layer,
+            activation_fn=activation_fn,
             device=device,
             dtype=dtype,
             lazy_encoder=lazy_encoder,
