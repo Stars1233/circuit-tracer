@@ -195,6 +195,7 @@ def run_attribution(args, parser):
 
     # Ensure graph output directory exists if needed
     if create_graph_files_enabled:
+        assert isinstance(args.graph_file_dir, str)
         os.makedirs(args.graph_file_dir, exist_ok=True)
 
     import torch
@@ -259,11 +260,12 @@ def run_attribution(args, parser):
 
     # Create graph files if both slug and graph_file_dir are provided
     if create_graph_files_enabled:
+        assert isinstance(args.slug, str)
         logging.info(f"Creating graph files with slug: {args.slug}")
         create_graph_files(
             graph_or_path=graph,  # Use the graph object directly
             slug=args.slug,
-            scan=None,  # No scan argument needed
+            scan_name=None,  # No scan_name argument needed
             output_path=args.graph_file_dir,
             node_threshold=args.node_threshold,
             edge_threshold=args.edge_threshold,
